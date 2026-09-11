@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+backend/node_modules/
+frontend/node_modules/
+
+# Environment Variables & Secrets (Keep confidential!)
+.env
+backend/.env
+*.env
+*.env.local
+
+# Database / SQLite / Cache
+*.sqlite
+*.db
+
+# Temporary & Log files
+*.log
+npm-debug.log*
+yarn-debug.log*
+get_user_msg.*
+last_user_message_full.txt
+
+# OS Generated Files
+.DS_Store
+Thumbs.db
+desktop.ini
