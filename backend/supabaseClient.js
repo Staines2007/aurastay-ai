@@ -182,7 +182,7 @@ if (isSupabaseConfigured) {
           this.data.push(...newRows);
           this.writeData(this.data);
           
-          const returnData = Array.isArray(this.insertData) ? newRows : newRows[0];
+          const returnData = this.isSingle ? (newRows[0] || null) : (Array.isArray(this.insertData) ? newRows : newRows[0]);
           resolve({ data: returnData, error: null });
           return;
         }

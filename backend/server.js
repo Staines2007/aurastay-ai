@@ -145,6 +145,22 @@ function authenticateToken(req, res, next) {
   });
 }
 
+// Role-Based Authorization Middleware
+function requireRole(...allowedRoles) {
+  return (req, res, next) => {
+    if (!req.user || !allowedRoles.includes(req.user.role)) {
+      return res.status(403).json({ error: `Restricted permissions: ${allowedRoles.join('/')} access required.` });
+    }
+    next();
+  };
+}
+
+// Email Validation Helper
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+function isValidEmail(email) {
+  return typeof email === 'string' && EMAIL_REGEX.test(email.trim());
+}
+
 // ==========================================
 // 1. AUTH ROUTES
 // ==========================================
@@ -152,16 +168,21 @@ function authenticateToken(req, res, next) {
 // User Login (Checks public.users schema)
 app.post('/api/auth/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
-    if (!email || !password) {
+    const { email: rawEmail, password } = req.body;
+    if (!rawEmail || !password) {
       return res.status(400).json({ error: 'Email and password are required' });
+    }
+
+    const email = String(rawEmail).trim().toLowerCase();
+    if (!isValidEmail(email)) {
+      return res.status(400).json({ error: 'Invalid email address format' });
     }
 
     // Lookup user in Supabase public.users
     const { data: user, error } = await supabase
       .from('users')
       .select('*')
-      .eq('email', email.trim().toLowerCase())
+      .eq('email', email)
       .single();
 
     if (error || !user) {
@@ -193,10 +214,21 @@ app.post('/api/auth/login', async (req, res) => {
 // User Registration
 app.post('/api/auth/signup', async (req, res) => {
   try {
-    const { email, name, role, password } = req.body;
-    if (!email || !name || !password) {
+    const { email: rawEmail, name: rawName, password } = req.body;
+    if (!rawEmail || !rawName || !password) {
       return res.status(400).json({ error: 'Email, name, and password are required' });
     }
+
+    const email = String(rawEmail).trim().toLowerCase();
+    if (!isValidEmail(email)) {
+      return res.status(400).json({ error: 'Invalid email address format' });
+    }
+
+    const name = String(rawName).trim();
+
+    // SECURITY: Always enforce role as 'customer' for public registration.
+    // The backend is the authoritative source and ignores/rejects client-supplied roles.
+    const assignedRole = 'customer';
 
     const passwordHash = await bcrypt.hash(password, 10);
 
@@ -204,9 +236,9 @@ app.post('/api/auth/signup', async (req, res) => {
     const { data: newUser, error } = await supabase
       .from('users')
       .insert([{ 
-        email: email.trim().toLowerCase(), 
-        name: name.trim(), 
-        role: role || 'customer',
+        email: email, 
+        name: name, 
+        role: assignedRole,
         password_hash: passwordHash
       }])
       .select()
@@ -219,8 +251,9 @@ app.post('/api/auth/signup', async (req, res) => {
       return res.status(500).json({ error: error.message });
     }
 
-    const token = jwt.sign({ email: newUser.email, name: newUser.name, role: newUser.role }, JWT_SECRET);
-    res.status(211).json({ token, user: newUser });
+    const userRecord = Array.isArray(newUser) ? newUser[0] : newUser;
+    const token = jwt.sign({ email: userRecord.email, name: userRecord.name, role: userRecord.role }, JWT_SECRET);
+    res.status(211).json({ token, user: userRecord });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Internal Server Error' });
@@ -230,16 +263,21 @@ app.post('/api/auth/signup', async (req, res) => {
 // Mock Password Reset
 app.post('/api/auth/forgot-password', async (req, res) => {
   try {
-    const { email } = req.body;
-    if (!email) {
+    const { email: rawEmail } = req.body;
+    if (!rawEmail) {
       return res.status(400).json({ error: 'Email address is required' });
+    }
+
+    const email = String(rawEmail).trim().toLowerCase();
+    if (!isValidEmail(email)) {
+      return res.status(400).json({ error: 'Invalid email address format' });
     }
     
     // Check if user exists
     const { data: user, error } = await supabase
       .from('users')
       .select('*')
-      .eq('email', email.trim().toLowerCase())
+      .eq('email', email)
       .single();
 
     if (error || !user) {
@@ -533,6 +571,11 @@ app.put('/api/reservations/:id', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Reservation record not found.' });
     }
 
+    // Check ownership for customer
+    if (req.user.role === 'customer' && booking.user_email !== req.user.email) {
+      return res.status(403).json({ error: 'Restricted permissions: Cannot modify other user reservations.' });
+    }
+
     // Fetch the room to resolve base rate
     const { data: room, error: roomError } = await supabase
       .from('rooms')
@@ -779,12 +822,8 @@ app.post('/api/reviews', authenticateToken, async (req, res) => {
 // ==========================================
 
 // List users (Admin RBAC dashboard)
-app.get('/api/users', authenticateToken, async (req, res) => {
+app.get('/api/users', authenticateToken, requireRole('admin'), async (req, res) => {
   try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Restricted permissions: Admin access required.' });
-    }
-
     const { data: users, error } = await supabase.from('users').select('*');
     if (error) return res.status(500).json({ error: error.message });
     res.json(users || []);
@@ -795,15 +834,19 @@ app.get('/api/users', authenticateToken, async (req, res) => {
 });
 
 // Update User Role (Admin RBAC update role)
-app.put('/api/users/:email/role', authenticateToken, async (req, res) => {
+app.put('/api/users/:email/role', authenticateToken, requireRole('admin'), async (req, res) => {
   try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Restricted permissions: Admin access required.' });
+    const rawEmail = req.params.email;
+    if (!rawEmail) {
+      return res.status(400).json({ error: 'Target user email is required.' });
     }
 
-    const { email } = req.params;
-    const { role } = req.body;
+    const email = String(rawEmail).trim().toLowerCase();
+    if (!isValidEmail(email)) {
+      return res.status(400).json({ error: 'Invalid target email address format.' });
+    }
 
+    const { role } = req.body;
     if (!role || (role !== 'customer' && role !== 'staff' && role !== 'admin')) {
       return res.status(400).json({ error: 'Invalid target role configuration.' });
     }
@@ -811,11 +854,12 @@ app.put('/api/users/:email/role', authenticateToken, async (req, res) => {
     const { data: updatedUser, error } = await supabase
       .from('users')
       .update({ role })
-      .eq('email', email.toLowerCase())
+      .eq('email', email)
       .select()
       .single();
 
     if (error) return res.status(500).json({ error: error.message });
+    if (!updatedUser) return res.status(404).json({ error: 'Target user not found.' });
     res.json(updatedUser);
   } catch (err) {
     console.error(err);

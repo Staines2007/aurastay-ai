@@ -23,6 +23,9 @@ if (document.readyState === 'loading') {
   initLogin();
 }
 
+// Shared email validation regex
+const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
 function initAuthForm() {
   const authForm = document.getElementById('auth-form');
   const tabLogin = document.getElementById('tab-login');
@@ -50,11 +53,33 @@ function initAuthForm() {
     authForm.addEventListener('submit', async (e) => {
       e.preventDefault();
 
-      const selectedRole = document.getElementById('auth-role').value;
-      const email = document.getElementById('auth-email').value;
-      const password = document.getElementById('auth-password').value;
-      const name = document.getElementById('auth-name') ? document.getElementById('auth-name').value : '';
+      const emailInput = document.getElementById('auth-email');
+      const passwordInput = document.getElementById('auth-password');
+      const nameInput = document.getElementById('auth-name');
+
+      const email = emailInput ? emailInput.value.trim().toLowerCase() : '';
+      const password = passwordInput ? passwordInput.value : '';
+      const name = nameInput ? nameInput.value.trim() : '';
       const isRegister = tabRegister ? tabRegister.classList.contains('active') : false;
+
+      // Robust client-side email format validation
+      if (!email || !emailRegex.test(email)) {
+        alert('Please enter a valid email address (e.g. user@example.com).');
+        if (emailInput) emailInput.focus();
+        return;
+      }
+
+      if (!password) {
+        alert('Please enter your password.');
+        if (passwordInput) passwordInput.focus();
+        return;
+      }
+
+      if (isRegister && !name) {
+        alert('Please enter your full name.');
+        if (nameInput) nameInput.focus();
+        return;
+      }
 
       try {
         let endpoint = 'http://localhost:5000/api/auth/login';
@@ -62,7 +87,8 @@ function initAuthForm() {
 
         if (isRegister) {
           endpoint = 'http://localhost:5000/api/auth/signup';
-          payload = { email, name: name || email.split('@')[0], role: selectedRole, password };
+          // Public registration is authoritative customer role
+          payload = { email, name, password };
         }
 
         const res = await fetch(endpoint, {
@@ -97,18 +123,18 @@ function initAuthForm() {
           { name: "Admin Manager", email: "admin@aurastay.com", role: "admin" }
         ];
 
-        const lowerEmail = email.trim().toLowerCase();
-
         if (isRegister) {
           const displayName = name || email.split('@')[0];
-          if (!usersList.some(u => u.email.toLowerCase() === lowerEmail)) {
-            usersList.push({ name: displayName, email: email, role: selectedRole });
+          // Public registration strictly customer
+          const assignedRole = 'customer';
+          if (!usersList.some(u => u.email.toLowerCase() === email)) {
+            usersList.push({ name: displayName, email: email, role: assignedRole });
             localStorage.setItem('aurastay_users', JSON.stringify(usersList));
           }
-          localStorage.setItem('aura_user', JSON.stringify({ name: displayName, email: email, role: selectedRole }));
-          window.location.href = `dashboard.html?role=${selectedRole}&email=${email}`;
+          localStorage.setItem('aura_user', JSON.stringify({ name: displayName, email: email, role: assignedRole }));
+          window.location.href = `dashboard.html?role=${assignedRole}&email=${email}`;
         } else {
-          const existingUser = usersList.find(u => u.email.toLowerCase() === lowerEmail);
+          const existingUser = usersList.find(u => u.email.toLowerCase() === email);
           if (!existingUser) {
             alert('Incorrect username or password');
             return;
@@ -124,8 +150,14 @@ function initAuthForm() {
   if (forgotBtn) {
     forgotBtn.addEventListener('click', async (e) => {
       e.preventDefault();
-      const email = prompt("Enter your registered email address to receive a password reset link:");
-      if (!email) return;
+      const rawEmail = prompt("Enter your registered email address to receive a password reset link:");
+      if (!rawEmail) return;
+
+      const email = rawEmail.trim().toLowerCase();
+      if (!emailRegex.test(email)) {
+        alert('Please enter a valid email address.');
+        return;
+      }
 
       try {
         const response = await fetch('http://localhost:5000/api/auth/forgot-password', {

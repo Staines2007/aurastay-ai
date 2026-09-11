@@ -9,9 +9,10 @@ backend/.env
 *.env
 *.env.local
 
-# Database / SQLite / Cache
+# Database / SQLite / Cache / Local JSON
 *.sqlite
 *.db
+backend/data/
 
 # Temporary & Log files
 *.log
