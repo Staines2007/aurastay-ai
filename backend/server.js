@@ -253,7 +253,7 @@ app.post('/api/auth/signup', async (req, res) => {
 
     const userRecord = Array.isArray(newUser) ? newUser[0] : newUser;
     const token = jwt.sign({ email: userRecord.email, name: userRecord.name, role: userRecord.role }, JWT_SECRET);
-    res.status(211).json({ token, user: userRecord });
+    res.status(201).json({ token, user: userRecord });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Internal Server Error' });
